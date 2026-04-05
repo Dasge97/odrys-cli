@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ type scanFinishedMsg struct {
 
 type model struct {
 	root         string
-	bridge       *backend.Bridge
+	service      *backend.Service
 	mode         screenMode
 	width        int
 	height       int
@@ -85,7 +86,7 @@ func NewModel(root string) tea.Model {
 
 	return &model{
 		root:          root,
-		bridge:        backend.NewBridge(root),
+		service:       backend.NewService(root),
 		mode:          modeHome,
 		homeInput:     home,
 		sessionInput:  session,
@@ -299,7 +300,8 @@ func (m *model) runGoalCmd(goal string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
-		result, err := m.bridge.Run(ctx, goal)
+		_ = ctx
+		result, err := m.service.Run(goal)
 		return runFinishedMsg{result: result, err: err}
 	}
 }
@@ -308,8 +310,16 @@ func (m *model) scanCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		output, err := m.bridge.Scan(ctx)
-		return scanFinishedMsg{output: output, err: err}
+		_ = ctx
+		output, err := m.service.Scan()
+		if err != nil {
+			return scanFinishedMsg{err: err}
+		}
+		raw, marshalErr := json.MarshalIndent(output, "", "  ")
+		if marshalErr != nil {
+			return scanFinishedMsg{err: marshalErr}
+		}
+		return scanFinishedMsg{output: string(raw), err: nil}
 	}
 }
 
@@ -317,7 +327,8 @@ func (m *model) loadDoctorCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		payload, err := m.bridge.Doctor(ctx)
+		_ = ctx
+		payload, err := m.service.Doctor()
 		return doctorLoadedMsg{payload: payload, err: err}
 	}
 }

@@ -18,4 +18,5 @@ if command -v go >/dev/null 2>&1; then
   exec go run "${ROOT_DIR}/cmd/odrys" "$@"
 fi
 
-exec node "${ROOT_DIR}/src/cli.js" "$@"
+echo "Odrys requiere Go o un binario compilado en dist/odrys." >&2
+exit 1

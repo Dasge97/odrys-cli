@@ -6,19 +6,21 @@
   "workspace": {
     "path": ".",
     "include": [
-      "package.json",
+      "go.mod",
       "README.md",
-      "src",
-      "app",
-      "lib"
+      "cmd",
+      "internal",
+      "project"
     ],
     "exclude": [
-      "node_modules",
       ".git",
       "opencode-dev",
       "dist",
       "build",
-      "coverage"
+      "coverage",
+      ".go-cache",
+      ".go-mod-cache",
+      ".go-path"
     ]
   },
   "permission": {

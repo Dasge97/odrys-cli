@@ -18,35 +18,28 @@ Ahora contiene una implementacion minima de una CLI local con:
 
 ## Componentes
 
-### `src/cli.js`
+### `cmd/odrys/main.go`
 
 Punto de entrada.
-Expone comandos de inicializacion, diagnostico y ejecucion.
+Expone TUI, inicializacion, diagnostico, ejecucion y workspace.
 
-### `src/core/worker.js`
+### `internal/backend/runtime.go`
 
-Orquesta el flujo completo de planificacion, ejecucion, review, resumen y persistencia.
+Orquesta planificacion, ejecucion, review, resumen, providers, workspace y persistencia.
 
-### `src/core/context-engine.js`
+### `internal/backend/config.go`
 
-Selecciona el contexto base que se inyecta a cada agente desde `project/` y desde el `workspace` objetivo.
+Carga scaffold, defaults y configuracion del proyecto.
 
-### `src/core/state-manager.js`
+### `internal/app/model.go`
 
-Lee y escribe `project_state.md`, crea logs de ejecucion y actualiza archivos base.
+Implementa la experiencia Bubble Tea y el flujo visual principal.
 
-### `src/core/workspace.js`
+### `internal/backend/types.go`
 
-Resuelve el workspace objetivo y construye snapshots deterministas del repositorio local.
+Define contratos compartidos del runtime y los agentes.
 
-### `src/llm/*`
-
-Adaptadores de proveedor.
-La interfaz es pequena y estable.
-
-### `src/tools/*`
-
-Implementa las herramientas locales que usa el sistema para inspeccionar un repo.
+El runtime incluye tambien tools locales, permisos, estado, providers y operaciones.
 
 ## Filosofia
 
