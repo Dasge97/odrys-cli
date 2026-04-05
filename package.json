@@ -1,0 +1,18 @@
+{
+  "name": "odrys-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "odrys": "./bin/odrys"
+  },
+  "scripts": {
+    "tui": "node src/cli.js tui",
+    "init": "node src/cli.js init",
+    "run": "node src/cli.js run",
+    "doctor": "node src/cli.js doctor"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81"
+  }
+}

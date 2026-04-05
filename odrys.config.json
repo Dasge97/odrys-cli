@@ -1,0 +1,51 @@
+{
+  "provider": {
+    "name": "mock",
+    "model": "odrys-mock-1"
+  },
+  "workspace": {
+    "path": ".",
+    "include": [
+      "package.json",
+      "README.md",
+      "src",
+      "app",
+      "lib"
+    ],
+    "exclude": [
+      "node_modules",
+      ".git",
+      "opencode-dev",
+      "dist",
+      "build",
+      "coverage"
+    ]
+  },
+  "permission": {
+    "read": {
+      "*": "allow"
+    },
+    "edit": {
+      "*": "ask",
+      ".odrys-sandbox/**": "allow"
+    },
+    "list": {
+      "*": "allow"
+    },
+    "search": {
+      "*": "allow"
+    },
+    "bash": {
+      "*": "ask",
+      "git status --short": "allow",
+      "git rev-parse --is-inside-work-tree": "allow"
+    }
+  },
+  "worker": {
+    "maxReviewLoops": 2,
+    "planner": {
+      "auto": true
+    },
+    "summarizeOnSuccess": true
+  }
+}

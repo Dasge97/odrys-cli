@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Local runtime and sandbox
+.odrys-sandbox/
+logs/runs/
+
+# Local tooling
+.codex
+
+# OS / editor leftovers
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*~
+
+# Windows zone identifier artifacts
+*:Zone.Identifier
+
+# Local reference copy, not part of Odrys itself
+opencode-dev/
+
+# Environment files
+.env
+.env.*
+!.env.example

@@ -1,0 +1,13 @@
+{
+  "common_rules": [
+    "Todas las respuestas deben ser JSON valido",
+    "No se permite texto fuera del objeto JSON",
+    "El worker debe validar el contrato minimo de cada agente"
+  ],
+  "contracts": {
+    "planner": ["status", "summary", "phases", "next_action"],
+    "executor": ["status", "summary", "changes", "assumptions", "open_questions", "operations", "next_action"],
+    "reviewer": ["status", "summary", "errors", "verified_against", "next_action"],
+    "summarizer": ["status", "project_state", "next_action"]
+  }
+}
