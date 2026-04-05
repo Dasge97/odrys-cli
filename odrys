@@ -3,4 +3,19 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ODYRS_ROOT="${ROOT_DIR}"
+LOCAL_GO="${HOME}/.local/go/bin/go"
+
+if [ -x "${ROOT_DIR}/dist/odrys" ]; then
+  exec "${ROOT_DIR}/dist/odrys" "$@"
+fi
+
+if [ -x "${LOCAL_GO}" ]; then
+  exec "${LOCAL_GO}" run "${ROOT_DIR}/cmd/odrys" "$@"
+fi
+
+if command -v go >/dev/null 2>&1; then
+  exec go run "${ROOT_DIR}/cmd/odrys" "$@"
+fi
+
 exec node "${ROOT_DIR}/src/cli.js" "$@"

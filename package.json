@@ -7,10 +7,13 @@
     "odrys": "./bin/odrys"
   },
   "scripts": {
-    "tui": "node src/cli.js tui",
+    "tui": "go run ./cmd/odrys",
+    "legacy:tui": "node src/cli.js tui",
+    "go:tui": "go run ./cmd/odrys",
     "init": "node src/cli.js init",
     "run": "node src/cli.js run",
-    "doctor": "node src/cli.js doctor"
+    "doctor": "node src/cli.js doctor",
+    "build:go": "mkdir -p dist && go build -o dist/odrys ./cmd/odrys"
   },
   "dependencies": {
     "blessed": "^0.1.81"

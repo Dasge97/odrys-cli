@@ -66,6 +66,18 @@ function formatRunResult(result) {
   return lines
 }
 
+function formatCard(lines, accent = "#4d8dff") {
+  const width = Math.max(20, ...lines.map((line) => line.replace(/\{[^}]+\}/g, "").length))
+  const top = `{${accent}-fg}┌${"─".repeat(width + 2)}┐{/}`
+  const body = lines.map((line) => {
+    const raw = line.replace(/\{[^}]+\}/g, "")
+    const pad = " ".repeat(Math.max(0, width - raw.length))
+    return `{${accent}-fg}│{/} ${line}${pad} {${accent}-fg}│{/}`
+  })
+  const bottom = `{${accent}-fg}└${"─".repeat(width + 2)}┘{/}`
+  return [top, ...body, bottom]
+}
+
 function formatScan(snapshot) {
   const lines = [
     "{green-fg}Workspace escaneado{/}",
@@ -145,7 +157,8 @@ export async function startTui() {
     mode: "home",
     busy: false,
     sessionStartedAt: null,
-    transcript: []
+    transcript: [],
+    homeClosed: false
   }
 
   const screen = blessed.screen({
@@ -155,8 +168,20 @@ export async function startTui() {
     title: "Odrys"
   })
 
-  const homeLogo = blessed.box({
+  const homeView = blessed.box({
     parent: screen,
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    hidden: false,
+    style: {
+      bg: "#1a1a1a"
+    }
+  })
+
+  const homeLogo = blessed.box({
+    parent: homeView,
     top: 2,
     left: 0,
     width: 58,
@@ -165,12 +190,13 @@ export async function startTui() {
     valign: "middle",
     content: normalizeLogo(LOGO).join("\n"),
     style: {
-      fg: "#f2f2f2"
+      fg: "#f2f2f2",
+      transparent: false
     }
   })
 
   const homeInputFrame = blessed.box({
-    parent: screen,
+    parent: homeView,
     top: 10,
     left: 0,
     width: 48,
@@ -178,7 +204,8 @@ export async function startTui() {
     border: "line",
     style: {
       border: { fg: "#4d8dff" },
-      bg: "#1f1f1f"
+      bg: "#1f1f1f",
+      transparent: false
     }
   })
 
@@ -210,7 +237,7 @@ export async function startTui() {
   })
 
   const homeHelp = blessed.box({
-    parent: screen,
+    parent: homeView,
     top: 15,
     left: 0,
     width: 48,
@@ -248,24 +275,25 @@ export async function startTui() {
 
   const sessionHeader = blessed.box({
     parent: screen,
-    top: 0,
-    left: 1,
-    right: 1,
+    top: 1,
+    left: 2,
+    right: 2,
     height: 3,
     border: "line",
     hidden: true,
     tags: true,
     style: {
-      border: { fg: "#5c5c5c" },
-      bg: "#151515"
+      border: { fg: "#3f3f3f" },
+      bg: "#151515",
+      fg: "#f0f0f0"
     }
   })
 
   const timeline = blessed.box({
     parent: screen,
-    top: 4,
-    left: 1,
-    right: 1,
+    top: 5,
+    left: 2,
+    right: 2,
     bottom: 8,
     tags: true,
     scrollable: true,
@@ -284,20 +312,41 @@ export async function startTui() {
 
   const composerFrame = blessed.box({
     parent: screen,
-    left: 1,
-    right: 1,
+    left: 2,
+    right: 2,
     bottom: 2,
-    height: 6,
-    border: "line",
+    height: 4,
     hidden: true,
     style: {
-      border: { fg: "#4d8dff" },
-      bg: "#1f1f1f"
+      bg: "#121212",
+      fg: "#f0f0f0"
+    }
+  })
+
+  const composerAccent = blessed.box({
+    parent: composerFrame,
+    left: 0,
+    top: 0,
+    width: 1,
+    bottom: 0,
+    style: {
+      bg: "#4d8dff"
+    }
+  })
+
+  const composerPanel = blessed.box({
+    parent: composerFrame,
+    left: 1,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    style: {
+      bg: "#1c1c1c"
     }
   })
 
   const composerInput = blessed.textbox({
-    parent: composerFrame,
+    parent: composerPanel,
     inputOnFocus: true,
     keys: true,
     mouse: true,
@@ -307,49 +356,77 @@ export async function startTui() {
     height: 1,
     style: {
       fg: "#f5f5f5",
-      bg: "#1f1f1f"
+      bg: "#1c1c1c"
     }
   })
 
   const composerMeta = blessed.box({
-    parent: composerFrame,
-    bottom: 1,
+    parent: composerPanel,
+    bottom: 0,
     left: 2,
     height: 1,
     tags: true,
-    content: "{#4d8dff-fg}Cocinero{/}  {white-fg}mock{/}  {gray-fg}Odrys{/}",
+    content: "{#4d8dff-fg}Cocinero{/}  {white-fg}odrys-mock-1{/}  {gray-fg}mock{/}",
     style: {
-      bg: "#1f1f1f"
+      bg: "#181818"
     }
   })
 
   const sessionFooter = blessed.box({
     parent: screen,
-    left: 1,
-    right: 1,
+    left: 2,
+    right: 2,
     bottom: 0,
     height: 1,
     tags: true,
     hidden: true,
-    content: "{gray-fg}esc{/} interrupt                               {bold}ctrl+t{/} variants   {bold}tab{/} agents   {bold}ctrl+p{/} commands",
+    content: "{gray-fg}esc{/} interrupt                                        {bold}ctrl+t{/} variants   {bold}tab{/} agents   {bold}ctrl+p{/} commands",
     style: {
       fg: "#8a8a8a"
     }
   })
 
   function setMode(mode) {
+    const previous = app.mode
     app.mode = mode
     const home = mode === "home"
     const help = mode === "help"
     const session = mode === "session"
-    homeLogo.hidden = !home
-    homeInputFrame.hidden = !home
-    homeHelp.hidden = !home
+    if (session && previous === "home" && !app.homeClosed) {
+      homeView.destroy()
+      app.homeClosed = true
+    }
+    if (!app.homeClosed) {
+      homeView.hidden = !home
+    }
     helpOverlay.hidden = !help
     sessionHeader.hidden = !session
     timeline.hidden = !session
     composerFrame.hidden = !session
     sessionFooter.hidden = !session
+    if (home) {
+      homeLogo.show()
+      homeInputFrame.show()
+      homeHelp.show()
+    } else {
+      homeLogo.hide()
+      homeInputFrame.hide()
+      homeHelp.hide()
+    }
+    if (help) {
+      helpOverlay.show()
+    } else {
+      helpOverlay.hide()
+    }
+    if (session) {
+      sessionHeader.setFront()
+      timeline.setFront()
+      composerFrame.setFront()
+      sessionFooter.setFront()
+    }
+    if (help) {
+      helpOverlay.setFront()
+    }
     if (home) homeInput.focus()
     else if (help) helpOverlay.focus()
     else composerInput.focus()
@@ -358,7 +435,9 @@ export async function startTui() {
 
   function addTranscript(lines, prefix = "") {
     const next = Array.isArray(lines) ? lines : [lines]
-    if (prefix) app.transcript.push(prefix)
+    if (prefix) {
+      app.transcript.push(prefix)
+    }
     app.transcript.push(...next)
     timeline.setContent(app.transcript.join("\n"))
     timeline.setScrollPerc(100)
@@ -373,15 +452,17 @@ export async function startTui() {
 
   function render() {
     renderSessionHeader()
-    const layout = homeLayout(screen)
-    const frameLeft = Math.max(0, layout.logoLeft - 2)
-    homeLogo.left = layout.logoLeft
-    homeLogo.width = layout.logoWidth
-    homeLogo.setContent(layout.logoLines.join("\n"))
-    homeInputFrame.left = frameLeft
-    homeInputFrame.width = layout.frameWidth
-    homeHelp.left = frameLeft
-    homeHelp.width = layout.frameWidth
+    if (!app.homeClosed) {
+      const layout = homeLayout(screen)
+      const frameLeft = Math.max(0, layout.logoLeft - 2)
+      homeLogo.left = layout.logoLeft
+      homeLogo.width = layout.logoWidth
+      homeLogo.setContent(layout.logoLines.join("\n"))
+      homeInputFrame.left = frameLeft
+      homeInputFrame.width = layout.frameWidth
+      homeHelp.left = frameLeft
+      homeHelp.width = layout.frameWidth
+    }
     const meta = `{#4d8dff-fg}Cocinero{/}  {white-fg}${state.provider.model}{/}  {gray-fg}${state.provider.name}{/}`
     homeMeta.setContent(meta)
     composerMeta.setContent(meta)
@@ -499,8 +580,8 @@ export async function startTui() {
     app.busy = true
     if (!app.sessionStartedAt) app.sessionStartedAt = stamp()
 
-    addTranscript([goal], "{#4d8dff-fg}▎{/} {white-fg}Usuario{/}")
-    addTranscript([`{#4d8dff-fg}◻{/} {white-fg}Cocinero{/} {gray-fg}· ${state.provider.model} ${state.provider.name}{/}`])
+    addTranscript(formatCard([goal]))
+    addTranscript([` {#4d8dff-fg}◻{/} {white-fg}Cocinero{/} {gray-fg}· ${state.provider.model} ${state.provider.name}{/}`])
     render()
 
     try {
@@ -509,6 +590,7 @@ export async function startTui() {
         goal,
         config: state
       })
+      addTranscript([""])
       addTranscript(formatRunResult(result))
     } catch (error) {
       addTranscript([error instanceof Error ? error.message : String(error)], "{red-fg}Error{/}")
@@ -521,7 +603,7 @@ export async function startTui() {
   async function submitFrom(box) {
     if (app.busy) return
     const value = box.getValue().trim()
-    box.clearValue()
+    box.setValue("")
     render()
     if (!value) return
 
@@ -536,7 +618,7 @@ export async function startTui() {
 
   homeInput.on("submit", async () => {
     await submitFrom(homeInput)
-    homeInput.focus()
+    if (!app.homeClosed) homeInput.focus()
     render()
   })
 

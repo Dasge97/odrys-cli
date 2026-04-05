@@ -1,6 +1,12 @@
 # Dependencies
 node_modules/
 
+# Go build outputs
+dist/
+.go-cache/
+.go-mod-cache/
+.go-path/
+
 # Local runtime and sandbox
 .odrys-sandbox/
 logs/runs/

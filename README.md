@@ -4,27 +4,21 @@ CLI personal de agentes orquestados para desarrollo asistido por IA.
 
 Odrys es un cliente de desarrollo asistido por IA, pensado para terminal, que orquesta agentes especializados, memoria persistente del proyecto y operaciones reales sobre el workspace mediante una TUI propia.
 
-Esta base implementa una v1 minima y util:
-
-- `Metre` opcional
-- `Cocinero`
-- `Auditor`
-- `Caja` ocasional
-- `worker` determinista
-
-No intenta replicar OpenCode completo.
-Toma sus ideas utiles y las reduce a una herramienta local, entendible y mantenible para uso personal.
+La nueva direccion del proyecto es `Go + Bubble Tea` para el cliente.
+La capa Node sigue viva de forma temporal como backend puente mientras terminamos la migracion.
 
 ## Estructura
 
-- `src/`: codigo de la CLI y del worker
+- `cmd/odrys/`: entrada principal del cliente en Go
+- `internal/`: TUI Bubble Tea y puente temporal con el backend Node
+- `src/`: backend y runtime heredado en Node
 - `system/`: prompt base del sistema
 - `agents/`: prompts por agente
 - `project/`: memoria externa del proyecto
 - `schemas/`: contratos JSON
 - `docs/`: documentacion operativa
 - `logs/`: historial de ejecuciones
-- `opencode-dev/`: referencia externa, no forma parte de la v1 propia
+- `opencode-dev/`: referencia externa local, no forma parte de Odrys
 
 ## Estado
 
@@ -32,7 +26,8 @@ El proyecto esta en una v1 funcional y experimental.
 
 Hoy ya incluye:
 
-- TUI propia de terminal
+- cliente Go en migracion con Bubble Tea
+- backend Node operativo como puente
 - flujo de agentes `Metre`, `Cocinero`, `Auditor` y `Caja`
 - memoria externa en archivos
 - soporte de `workspace` real
@@ -42,13 +37,45 @@ Todavia no incluye:
 
 - sesiones persistentes de larga duracion
 - aprobaciones interactivas para permisos `ask`
-- automatizacion completa del ciclo de edicion sobre cualquier repo
+- reescritura completa del worker al stack Go
 
-## Comandos
+## Arranque
+
+Ruta nueva recomendada:
 
 ```bash
+./odrys
+```
+
+El wrapper intenta usar este orden:
+
+1. `./dist/odrys` si ya existe el binario compilado
+2. `go run ./cmd/odrys` si Go esta instalado
+3. `node src/cli.js` como fallback temporal
+
+Tambien puedes usar:
+
+```bash
+make run
+make build
+./dist/odrys
+```
+
+Si quieres enlazarlo localmente:
+
+```bash
+chmod +x install-local.sh
+./install-local.sh
+source ~/.bashrc
+hash -r
 odrys
-npm link
+```
+
+## Comandos legacy del backend Node
+
+Mientras dura la migracion, el backend actual sigue disponible:
+
+```bash
 node src/cli.js init
 node src/cli.js run "crear una CLI para gestionar notas" --provider mock
 node src/cli.js doctor
@@ -59,62 +86,37 @@ node src/cli.js workspace patch --workspace ../mi-proyecto --file ./cambio.patch
 
 ## Cliente
 
-La experiencia principal ya puede lanzarse como un cliente de terminal propio.
+La TUI nueva nace con separacion de vistas real:
 
-Si haces:
+- `home`
+- `help`
+- `session`
 
-```bash
-npm link
-odrys
-```
-
-se abre la TUI de Odrys.
-
-La TUI ya muestra:
+Y el backend actual sigue aportando:
 
 - estado actual de workspace y proveedor
-- resumen del run ejecutado
-- operaciones aplicadas por `Cocinero`
-- historial reciente desde `logs/runs/`
+- ejecucion de `Cocinero` y `Auditor`
+- operaciones aplicadas
+- logs estructurados
 
-Si `npm link` falla por permisos, usa el instalador local:
+## Migracion a Go
+
+La TUI vieja en Node queda como ruta `legacy`.
+La migracion actual usa un puente: el cliente Go ejecuta el backend Node mediante comandos internos y renderiza la experiencia con Bubble Tea.
+
+Esto nos permite:
+
+- eliminar problemas de render y foco del cliente anterior
+- mejorar la arquitectura visual sin rehacer aun todo el worker
+- migrar por capas en vez de romper lo que ya funciona
+
+En esta maquina no he podido compilar la nueva app porque `go` no esta instalado todavia.
+En cuanto lo tengas, la ruta normal sera:
 
 ```bash
-chmod +x install-local.sh
-./install-local.sh
-odrys
+make build
+./dist/odrys
 ```
-
-Tambien puedes arrancarlo sin instalar nada:
-
-```bash
-./odrys
-```
-
-## Subir a GitHub
-
-El repositorio ya ignora artefactos locales como:
-
-- `node_modules/`
-- `.odrys-sandbox/`
-- `logs/runs/`
-- `.codex`
-- `opencode-dev/`
-
-La carpeta `opencode-dev/` se ha usado solo como referencia local y no forma parte de Odrys.
-
-Dentro del cliente puedes usar:
-
-- texto libre para lanzar una tarea
-- `/scan`
-- `/doctor`
-- `/runs`
-- `/show <n>`
-- `/workspace <ruta>`
-- `/provider <name>`
-- `/model <id>`
-- `/run <objetivo>`
-- `/exit`
 
 ## Proveedores
 
@@ -195,13 +197,15 @@ Ejemplo:
 }
 ```
 
-## Alcance real de esta v1
+## Subir a GitHub
 
-Esto todavia no aplica cambios automaticos sobre el workspace objetivo.
-Pero ya tiene base real para leer, inspeccionar, validar permisos y construir contexto sobre un repo local.
+El repositorio ya ignora artefactos locales como:
 
-El siguiente salto natural seria:
+- `node_modules/`
+- `dist/`
+- `.odrys-sandbox/`
+- `logs/runs/`
+- `.codex`
+- `opencode-dev/`
 
-- conectar `Cocinero` a cambios automaticos sobre el workspace
-- anadir aprobaciones interactivas para `ask`
-- anadir subagentes cuando de verdad hagan falta
+La carpeta `opencode-dev/` se ha usado solo como referencia local y no forma parte de Odrys.
