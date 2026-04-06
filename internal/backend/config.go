@@ -1,10 +1,37 @@
 package backend
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
+
+type rawConfig struct {
+	Provider   ProviderConfig               `json:"provider"`
+	Workspace  WorkspaceConfig              `json:"workspace"`
+	Permission map[string]map[string]string `json:"permission"`
+	Worker     rawWorkerConfig              `json:"worker"`
+	Session    rawSessionConfig             `json:"session"`
+}
+
+type rawWorkerConfig struct {
+	MaxReviewLoops    int               `json:"maxReviewLoops"`
+	Planner           rawPlannerConfig  `json:"planner"`
+	SummarizeOnSuccess *bool            `json:"summarizeOnSuccess"`
+}
+
+type rawPlannerConfig struct {
+	Auto *bool `json:"auto"`
+}
+
+type rawSessionConfig struct {
+	AutoResume      *bool `json:"autoResume"`
+	ContextMessages int   `json:"contextMessages"`
+	ContextRuns     int   `json:"contextRuns"`
+	ContextFiles    int   `json:"contextFiles"`
+}
 
 var defaultFiles = map[string]string{
 	"project/spec.md":            "# Spec\n",
@@ -13,6 +40,8 @@ var defaultFiles = map[string]string{
 	"project/checklist.md":       "# Checklist\n",
 	"project/project_state.md":   "# Project State\n",
 	"logs/.gitkeep":              "",
+	".odrys/.gitkeep":            "",
+	"agents/odrys_prompt.md":     "Eres `Odrys`.\n",
 	"agents/metre_prompt.md":     "Eres `Metre`.\n",
 	"agents/cocinero_prompt.md":  "Eres `Cocinero`.\n",
 	"agents/auditor_prompt.md":   "Eres `Auditor`.\n",
@@ -49,6 +78,12 @@ var defaultConfig = Config{
 		},
 		SummarizeOnSuccess: true,
 	},
+	Session: SessionConfig{
+		AutoResume:      true,
+		ContextMessages: 8,
+		ContextRuns:     4,
+		ContextFiles:    6,
+	},
 }
 
 func ensureProjectScaffold(root string) error {
@@ -77,12 +112,13 @@ func ensureProjectScaffold(root string) error {
 }
 
 func loadConfig(root string) (Config, error) {
+	_ = loadLocalEnv(root)
 	raw, err := os.ReadFile(filepath.Join(root, "odrys.config.json"))
 	if err != nil {
 		return Config{}, err
 	}
 
-	var parsed Config
+	var parsed rawConfig
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return Config{}, err
 	}
@@ -111,7 +147,119 @@ func loadConfig(root string) (Config, error) {
 	if parsed.Worker.MaxReviewLoops != 0 {
 		cfg.Worker.MaxReviewLoops = parsed.Worker.MaxReviewLoops
 	}
-	cfg.Worker.Planner.Auto = parsed.Worker.Planner.Auto || defaultConfig.Worker.Planner.Auto
-	cfg.Worker.SummarizeOnSuccess = parsed.Worker.SummarizeOnSuccess || defaultConfig.Worker.SummarizeOnSuccess
+	if parsed.Worker.Planner.Auto != nil {
+		cfg.Worker.Planner.Auto = *parsed.Worker.Planner.Auto
+	}
+	if parsed.Worker.SummarizeOnSuccess != nil {
+		cfg.Worker.SummarizeOnSuccess = *parsed.Worker.SummarizeOnSuccess
+	}
+	if parsed.Session.ContextMessages != 0 {
+		cfg.Session.ContextMessages = parsed.Session.ContextMessages
+	}
+	if parsed.Session.ContextRuns != 0 {
+		cfg.Session.ContextRuns = parsed.Session.ContextRuns
+	}
+	if parsed.Session.ContextFiles != 0 {
+		cfg.Session.ContextFiles = parsed.Session.ContextFiles
+	}
+	if parsed.Session.AutoResume != nil {
+		cfg.Session.AutoResume = *parsed.Session.AutoResume
+	}
 	return cfg, nil
+}
+
+func saveConfig(root string, cfg Config) error {
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(root, "odrys.config.json"), append(raw, '\n'), 0o644)
+}
+
+func loadLocalEnv(root string) error {
+	paths := []string{
+		filepath.Join(root, ".env"),
+		filepath.Join(root, ".env.local"),
+	}
+	for _, path := range paths {
+		if err := loadEnvFile(path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadEnvFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if key == "" {
+			continue
+		}
+		if os.Getenv(key) == "" {
+			_ = os.Setenv(key, value)
+		}
+	}
+	return scanner.Err()
+}
+
+func saveOpenAIEnv(root, apiKey string) error {
+	path := filepath.Join(root, ".env")
+	lines := []string{}
+	if raw, err := os.ReadFile(path); err == nil {
+		existing := strings.Split(string(raw), "\n")
+		for _, line := range existing {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "OPENAI_API_KEY=") || strings.HasPrefix(trimmed, "export OPENAI_API_KEY=") {
+				continue
+			}
+			if trimmed == "" && len(lines) > 0 && lines[len(lines)-1] == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, "OPENAI_API_KEY="+apiKey)
+	content := strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+	return os.WriteFile(path, []byte(content), 0o600)
+}
+
+func saveEnvKey(root, envKey, value string) error {
+	path := filepath.Join(root, ".env")
+	lines := []string{}
+	if raw, err := os.ReadFile(path); err == nil {
+		existing := strings.Split(string(raw), "\n")
+		for _, line := range existing {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, envKey+"=") || strings.HasPrefix(trimmed, "export "+envKey+"=") {
+				continue
+			}
+			if trimmed == "" && len(lines) > 0 && lines[len(lines)-1] == "" {
+				continue
+			}
+			lines = append(lines, line)
+		}
+	}
+	lines = append(lines, envKey+"="+value)
+	content := strings.TrimRight(strings.Join(lines, "\n"), "\n") + "\n"
+	return os.WriteFile(path, []byte(content), 0o600)
 }

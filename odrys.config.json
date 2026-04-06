@@ -1,7 +1,7 @@
 {
   "provider": {
-    "name": "mock",
-    "model": "odrys-mock-1"
+    "name": "openai",
+    "model": "gpt-5.1-codex-max"
   },
   "workspace": {
     "path": ".",
@@ -24,8 +24,10 @@
     ]
   },
   "permission": {
-    "read": {
-      "*": "allow"
+    "bash": {
+      "*": "ask",
+      "git rev-parse --is-inside-work-tree": "allow",
+      "git status --short": "allow"
     },
     "edit": {
       "*": "ask",
@@ -34,13 +36,11 @@
     "list": {
       "*": "allow"
     },
-    "search": {
+    "read": {
       "*": "allow"
     },
-    "bash": {
-      "*": "ask",
-      "git status --short": "allow",
-      "git rev-parse --is-inside-work-tree": "allow"
+    "search": {
+      "*": "allow"
     }
   },
   "worker": {
@@ -49,5 +49,11 @@
       "auto": true
     },
     "summarizeOnSuccess": true
+  },
+  "session": {
+    "autoResume": true,
+    "contextMessages": 8,
+    "contextRuns": 4,
+    "contextFiles": 6
   }
 }

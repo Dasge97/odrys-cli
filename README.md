@@ -40,16 +40,22 @@ La implementacion heredada ya no forma parte del arbol activo.
 Hoy ya incluye:
 
 - cliente Bubble Tea propio
+- menu interactivo de ayuda y selector de sesiones dentro de la TUI
 - worker nativo en Go
 - flujo de agentes `Metre`, `Cocinero`, `Auditor` y `Caja`
 - memoria externa en archivos
+- sesiones persistentes en `logs/sessions/`
+- reanudacion automatica configurable de la sesion reciente
+- contexto enriquecido con resumen de sesion, mensajes relevantes, objetivos recientes, archivos tocados, notas recientes y runs recientes
+- aprobaciones interactivas en la TUI para permisos `ask`
 - soporte de `workspace` real
 - escritura controlada en sandbox y operaciones basicas
 
 Todavia no incluye:
 
-- sesiones persistentes de larga duracion
-- aprobaciones interactivas para permisos `ask`
+- streaming de tokens
+- paneles avanzados de sesiones y variantes
+- politicas de aprobacion persistentes mas finas
 
 ## Arranque
 
@@ -67,6 +73,9 @@ make build
 ./dist/odrys
 odrys doctor
 odrys run "crear archivo .odrys-sandbox/demo.txt con contenido hola"
+odrys sessions
+odrys sessions latest
+odrys provider current
 odrys workspace scan
 ```
 
@@ -86,6 +95,29 @@ odrys
 
 No usa red. Sirve para validar flujo, contratos, logs y operaciones.
 
+### `openai`
+
+Odrys es `OpenAI-first`.
+Puede conectarse a OpenAI de dos formas:
+
+- `API key`
+- `codigo` para iniciar sesion con tu cuenta de ChatGPT
+
+Las credenciales persistidas por Odrys se guardan en `.odrys/auth.json`.
+El fallback por entorno sigue funcionando con `OPENAI_API_KEY`.
+
+Variables soportadas:
+
+```bash
+export OPENAI_API_KEY=tu_api_key
+```
+
+Notas:
+
+- `OPENAI_API_KEY` sirve para la ruta clasica por API.
+- La ruta `codigo` usa navegador + callback local gestionado por `odrys-core`.
+- La build actual trata `ChatGPT Plus/Pro` como compatibilidad experimental tipo Codex.
+
 ### `openai-compatible`
 
 Usa un endpoint compatible con OpenAI Chat Completions.
@@ -100,6 +132,52 @@ export ODYRS_BASE_URL=https://api.openai.com/v1
 ```
 
 Tambien acepta `OPENAI_API_KEY`.
+
+Tambien puedes cambiar provider y modelo sin editar a mano la config:
+
+```bash
+odrys provider current
+odrys provider set openai gpt-4.1-mini
+odrys openai status
+odrys openai connect --api-key "sk-..." --model gpt-4.1-mini
+```
+
+## Backend local
+
+Odrys ya incluye un backend local propio:
+
+- `odrys-core`
+- o `odrys server`
+
+Arranque:
+
+```bash
+make run-server
+```
+
+o:
+
+```bash
+odrys server --host 127.0.0.1 --port 4111
+```
+
+Endpoints base:
+
+```bash
+GET  /health
+POST /api/v1/core/bootstrap
+GET  /api/v1/sessions
+POST /api/v1/sessions
+GET  /api/v1/openai/status
+POST /api/v1/openai/connect/api-key
+POST /api/v1/openai/connect/device/start
+GET  /api/v1/openai/connect/device/poll/:id
+POST /api/v1/openai/disconnect
+```
+
+Estado de la migracion del core/backend:
+
+- fases implementadas en [backend-phases.md](/home/tekilatime/PROYECTOS/Odrys-CLI/docs/system/backend-phases.md)
 
 ## Workspace real
 
@@ -132,10 +210,50 @@ En esta version:
 
 - `allow` ejecuta
 - `deny` bloquea
-- `ask` falla con un mensaje claro porque aun no hay flujo interactivo de aprobacion
+- `ask` abre una aprobacion interactiva dentro de la TUI
+- en modo CLI no interactivo, `ask` devuelve un error claro para evitar ejecuciones ambiguas
 
 `write` y `apply_patch` dependen del permiso `edit`.
 Por defecto solo queda permitido sin aprobacion el sandbox `.odrys-sandbox/**`.
+
+## Sesiones y contexto
+
+Las sesiones se guardan en `logs/sessions/`.
+
+Odrys usa esa memoria para reconstruir contexto con:
+
+- resumen persistente de la sesion
+- mensajes seleccionados por relevancia
+- objetivos recientes
+- archivos tocados recientemente
+- notas compactas de tareas previas
+- ultimos runs completados
+
+Comandos utiles dentro del cliente:
+
+```bash
+/sessions
+/resume latest
+/resume <session_id>
+```
+
+La TUI tambien permite:
+
+- abrir el menu con `ctrl+o`
+- abrir la vista de modelos/providers con `ctrl+l`
+- abrir `sessions` como lista interactiva de historiales guardados
+- entrar en una sesion seleccionada y volver a su chat
+- conectar OpenAI sin salir del cliente:
+  - `API key`
+  - `codigo` para ChatGPT
+
+Tambien por CLI:
+
+```bash
+odrys sessions
+odrys sessions latest
+odrys sessions show <session_id>
+```
 
 ## Artefactos ignorados
 
@@ -147,4 +265,5 @@ El repositorio ya excluye:
 - `.go-path/`
 - `.odrys-sandbox/`
 - `logs/runs/`
+- `logs/sessions/`
 - `opencode-dev/`

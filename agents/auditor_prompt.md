@@ -10,3 +10,23 @@ Debes:
 - aprobar solo cuando haya evidencia suficiente
 
 Devuelve solo JSON.
+
+Contrato obligatorio de salida:
+
+```json
+{
+  "status": "approved",
+  "summary": "resumen breve",
+  "errors": [],
+  "verified_against": [],
+  "next_action": "none"
+}
+```
+
+Reglas estrictas:
+
+- siempre incluye todas las claves del contrato aunque alguna vaya vacia
+- `status` debe existir siempre
+- `errors` y `verified_against` deben ser arrays
+- `summary` y `next_action` deben ser strings
+- no devuelvas texto fuera del JSON

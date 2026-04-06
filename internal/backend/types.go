@@ -26,6 +26,7 @@ type Config struct {
 	Workspace  WorkspaceConfig                 `json:"workspace"`
 	Permission map[string]map[string]string    `json:"permission"`
 	Worker     WorkerConfig                    `json:"worker"`
+	Session    SessionConfig                   `json:"session"`
 }
 
 type Workspace struct {
@@ -38,9 +39,19 @@ type DoctorPayload struct {
 	Root       string                 `json:"root"`
 	ConfigPath string                 `json:"configPath"`
 	Provider   ProviderConfig         `json:"provider"`
+	OpenAIConfigured bool             `json:"openaiConfigured"`
+	OpenAIAuth OpenAIAuthStatus       `json:"openaiAuth"`
 	Workspace  WorkspaceConfig        `json:"workspace"`
 	Permission map[string]map[string]string `json:"permission"`
 	Worker     WorkerConfig           `json:"worker"`
+	Session    SessionConfig          `json:"session"`
+}
+
+type SessionConfig struct {
+	AutoResume      bool `json:"autoResume"`
+	ContextMessages int  `json:"contextMessages"`
+	ContextRuns     int  `json:"contextRuns"`
+	ContextFiles    int  `json:"contextFiles"`
 }
 
 type RunResult struct {
@@ -50,6 +61,15 @@ type RunResult struct {
 	Tasks   []RunTask      `json:"tasks"`
 	Summary *SummarizerOutput `json:"summary,omitempty"`
 	LogPath string         `json:"log_path"`
+	SessionID string       `json:"session_id,omitempty"`
+}
+
+type ChatResult struct {
+	Status    string `json:"status"`
+	Goal      string `json:"goal"`
+	Reply     string `json:"reply"`
+	LogPath   string `json:"log_path"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type RunTask struct {
@@ -129,7 +149,56 @@ type AgentInfo struct {
 	Purpose string
 }
 
+type Session struct {
+	ID          string           `json:"id"`
+	Title       string           `json:"title"`
+	CreatedAt   string           `json:"created_at"`
+	UpdatedAt   string           `json:"updated_at"`
+	Summary     string           `json:"summary"`
+	Messages    []SessionMessage `json:"messages"`
+	RecentGoals []string         `json:"recent_goals"`
+	RecentFiles []string         `json:"recent_files,omitempty"`
+	RecentNotes []string         `json:"recent_notes,omitempty"`
+}
+
+type SessionMessage struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+}
+
+type SessionSummary struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updated_at"`
+	Summary   string `json:"summary"`
+}
+
+type PermissionPrompt struct {
+	Action  string `json:"action"`
+	Target  string `json:"target"`
+	Message string `json:"message"`
+}
+
+type ApprovalHandler func(PermissionPrompt) (bool, error)
+
+type RunOptions struct {
+	SessionID string
+	Overrides map[string]map[string]string
+}
+
+type PermissionRequiredError struct {
+	Prompt PermissionPrompt
+}
+
+func (e *PermissionRequiredError) Error() string {
+	return e.Prompt.Message
+}
+
 var agents = map[string]AgentInfo{
+	"general": {
+		Role: "general", Slug: "odrys", Name: "Odrys", Purpose: "conversa en lenguaje natural y resuelve directamente",
+	},
 	"planner": {
 		Role: "planner", Slug: "metre", Name: "Metre", Purpose: "descompone objetivos en fases y tareas",
 	},

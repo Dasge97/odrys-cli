@@ -9,7 +9,12 @@ dist/
 
 # Local runtime and sandbox
 .odrys-sandbox/
+.odrys/auth.json
+.odrys/core-state.json
+.odrys/core-client.json
+.odrys/server-state.json
 logs/runs/
+logs/sessions/
 
 # Local tooling
 .codex
