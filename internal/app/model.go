@@ -23,6 +23,7 @@ type screenMode string
 const (
 	modeHome    screenMode = "home"
 	modeHelp    screenMode = "help"
+	modeAgents  screenMode = "agents"
 	modeSessions screenMode = "sessions"
 	modeModels  screenMode = "models"
 	modeProviders screenMode = "providers"
@@ -55,6 +56,11 @@ type chatFinishedMsg struct {
 	err    error
 }
 
+type agentFinishedMsg struct {
+	result backend.AgentRunResult
+	err    error
+}
+
 type scanFinishedMsg struct {
 	output string
 	err    error
@@ -71,6 +77,12 @@ type approvalRequestMsg struct {
 }
 
 type helpMenuItem struct {
+	key         string
+	title       string
+	description string
+}
+
+type agentMenuItem struct {
 	key         string
 	title       string
 	description string
@@ -147,6 +159,7 @@ type model struct {
 	sessionAutoResume bool
 	sessions     []backend.SessionSummary
 	helpCursor   int
+	agentCursor  int
 	sessionCursor int
 	modelCursor  int
 	providerCursor int
@@ -292,6 +305,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.loadSessionsCmd()
 
 	case chatFinishedMsg:
+		m.busy = false
+		if typed.err != nil {
+			m.appendBlock(m.errorBubble(typed.err.Error()))
+			return m, nil
+		}
+		if typed.result.SessionID != "" {
+			m.sessionID = typed.result.SessionID
+		}
+		m.appendBlock(m.assistantBubble(m.currentAgentName, typed.result.Reply))
+		return m, m.loadSessionsCmd()
+
+	case agentFinishedMsg:
 		m.busy = false
 		if typed.err != nil {
 			m.appendBlock(m.errorBubble(typed.err.Error()))
@@ -452,6 +477,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateHome(typed)
 		case modeHelp:
 			return m.updateHelp(typed)
+		case modeAgents:
+			return m.updateAgents(typed)
 		case modeSessions:
 			return m.updateSessions(typed)
 		case modeModels:
@@ -489,6 +516,8 @@ func (m *model) View() string {
 	switch m.mode {
 	case modeHelp:
 		return m.helpView()
+	case modeAgents:
+		return m.agentsView()
 	case modeSessions:
 		return m.sessionsView()
 	case modeModels:
@@ -512,6 +541,14 @@ func (m *model) updateHome(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "ctrl+h":
+		m.previousMode = modeHome
+		m.syncAgentCursor()
+		m.mode = modeAgents
+		return m, nil
+	case "tab":
+		m.cycleAgent()
+		return m, nil
 	case "ctrl+l":
 		m.previousMode = modeHome
 		m.mode = modeModels
@@ -560,6 +597,42 @@ func (m *model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.closeOverlay()
 	case "enter":
 		return m.executeHelpSelection()
+	}
+	return m, nil
+}
+
+func (m *model) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := m.agentMenuItems()
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.agentCursor > 0 {
+			m.agentCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.agentCursor < len(items)-1 {
+			m.agentCursor++
+		}
+		return m, nil
+	case "esc", "q":
+		return m.closeOverlay()
+	case "enter":
+		if len(items) == 0 {
+			return m.closeOverlay()
+		}
+		if m.agentCursor < 0 {
+			m.agentCursor = 0
+		}
+		if m.agentCursor >= len(items) {
+			m.agentCursor = len(items) - 1
+		}
+		m.currentAgentName = items[m.agentCursor].title
+		if m.previousMode == modeSession {
+			m.infoText = ""
+		}
+		return m.closeOverlay()
 	}
 	return m, nil
 }
@@ -846,6 +919,14 @@ func (m *model) updateSession(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "ctrl+h":
+		m.previousMode = modeSession
+		m.syncAgentCursor()
+		m.mode = modeAgents
+		return m, nil
+	case "tab":
+		m.cycleAgent()
+		return m, nil
 	case "ctrl+l":
 		m.previousMode = modeSession
 		m.mode = modeModels
@@ -898,10 +979,9 @@ func (m *model) startChat(goal string) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent("")
 	}
 	m.appendBlock(m.userBubble(goal))
-	m.currentAgentName = "Odrys"
 	m.appendBlock(m.agentBadge(m.currentAgentName, m.providerModel, m.providerName))
 	m.busy = true
-	return m, m.runChatCmd(goal)
+	return m, m.runForCurrentAgentCmd(goal)
 }
 
 func (m *model) submitSession(value string) (tea.Model, tea.Cmd) {
@@ -963,11 +1043,10 @@ func (m *model) submitSession(value string) (tea.Model, tea.Cmd) {
 	}
 
 	m.normalizeOpenAIModelForCurrentAuth()
-	m.currentAgentName = "Odrys"
 	m.appendBlock(m.userBubble(value))
 	m.appendBlock(m.agentBadge(m.currentAgentName, m.providerModel, m.providerName))
 	m.busy = true
-	return m, m.runChatCmd(value)
+	return m, m.runForCurrentAgentCmd(value)
 }
 
 func (m *model) runGoalCmd(goal string) tea.Cmd {
@@ -991,6 +1070,29 @@ func (m *model) runChatCmd(goal string) tea.Cmd {
 			Overrides: m.permissionOverrides,
 		})
 		return chatFinishedMsg{result: result, err: err}
+	}
+}
+
+func (m *model) runAgentCmd(agentRole, goal string) tea.Cmd {
+	return func() tea.Msg {
+		result, err := m.service.RunAgentWithOptions(agentRole, goal, backend.RunOptions{
+			SessionID: m.sessionID,
+			Overrides: m.permissionOverrides,
+		})
+		var permissionErr *backend.PermissionRequiredError
+		if errors.As(err, &permissionErr) {
+			return approvalRequestMsg{prompt: permissionErr.Prompt, goal: goal}
+		}
+		return agentFinishedMsg{result: result, err: err}
+	}
+}
+
+func (m *model) runForCurrentAgentCmd(goal string) tea.Cmd {
+	switch m.currentAgentRole() {
+	case "planner", "executor", "reviewer", "summarizer":
+		return m.runAgentCmd(m.currentAgentRole(), goal)
+	default:
+		return m.runChatCmd(goal)
 	}
 }
 
@@ -1205,6 +1307,73 @@ func (m *model) providerStatusText() string {
 	}
 }
 
+func agentCycle() []string {
+	return []string{"Odrys", "Metre", "Cocinero", "Auditor", "Caja"}
+}
+
+func (m *model) agentMenuItems() []agentMenuItem {
+	return []agentMenuItem{
+		{key: "odrys", title: "Odrys", description: "chat libre con contexto del proyecto"},
+		{key: "metre", title: "Metre", description: "planifica y descompone la tarea"},
+		{key: "cocinero", title: "Cocinero", description: "implementa o propone operaciones"},
+		{key: "auditor", title: "Auditor", description: "revisa y detecta problemas"},
+		{key: "caja", title: "Caja", description: "resume y actualiza el estado del proyecto"},
+	}
+}
+
+func (m *model) cycleAgent() {
+	items := agentCycle()
+	current := 0
+	for index, item := range items {
+		if item == m.currentAgentName {
+			current = index
+			break
+		}
+	}
+	m.currentAgentName = items[(current+1)%len(items)]
+}
+
+func (m *model) syncAgentCursor() {
+	items := m.agentMenuItems()
+	for index, item := range items {
+		if item.title == m.currentAgentName {
+			m.agentCursor = index
+			return
+		}
+	}
+	m.agentCursor = 0
+}
+
+func (m *model) currentAgentRole() string {
+	switch m.currentAgentName {
+	case "Metre":
+		return "planner"
+	case "Cocinero":
+		return "executor"
+	case "Auditor":
+		return "reviewer"
+	case "Caja":
+		return "summarizer"
+	default:
+		return "general"
+	}
+}
+
+func agentColor(name string) lipgloss.Color {
+	switch name {
+	case "Metre":
+		return lipgloss.Color("#ffb347")
+	case "Cocinero":
+		return lipgloss.Color("#4d8dff")
+	case "Auditor":
+		return lipgloss.Color("#39d98a")
+	case "Caja":
+		return lipgloss.Color("#d98cff")
+	default:
+		return lipgloss.Color("#36c7ff")
+	}
+}
+
 func (m *model) isOpenAIAccountAuth() bool {
 	return m.providerName == "openai" && (m.openAIStatus.Method == "device_code" || m.openAIStatus.Method == "oauth")
 }
@@ -1237,7 +1406,7 @@ func (m *model) normalizeOpenAIModelForCurrentAuth() {
 }
 
 var (
-	pageStyle = lipgloss.NewStyle().Background(lipgloss.Color("#1a1a1a")).Foreground(lipgloss.Color("#f2f2f2"))
+	pageStyle = lipgloss.NewStyle().Background(lipgloss.Color("#151515")).Foreground(lipgloss.Color("#f2f2f2"))
 
 	logoStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f2f2f2")).
@@ -1245,18 +1414,19 @@ var (
 
 	homeFrameStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("#4d8dff")).
+			BorderForeground(lipgloss.Color("#4a4a4a")).
 			Background(lipgloss.Color("#1f1f1f")).
 			Padding(1, 2).
 			Width(46)
 
-	homeMetaAgentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4d8dff"))
+	homeMetaAgentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6fd48e"))
 	homeMetaTextStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f0f0f0"))
-	homeMetaMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	homeHelpStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#e6e600")).MarginTop(1)
+	homeMetaMutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8c8c8c"))
+	homeHelpStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fe0a1")).MarginTop(1)
+	homeHelpKeyStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fe0a1"))
 	menuPanelStyle     = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder()).
-				BorderForeground(lipgloss.Color("#454545")).
+				BorderForeground(lipgloss.Color("#3f3f3f")).
 				Background(lipgloss.Color("#141414")).
 				Padding(1, 2)
 	menuTitleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#f2f2f2")).Bold(true)
@@ -1268,10 +1438,10 @@ var (
 				BorderForeground(lipgloss.Color("#303030")).
 				Padding(0, 1)
 	menuItemActiveStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#1d2330")).
+				Background(lipgloss.Color("#1d221f")).
 				Foreground(lipgloss.Color("#f4f7fb")).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#4d8dff")).
+				BorderForeground(lipgloss.Color("#5fa876")).
 				Padding(0, 1)
 
 	sessionHeaderStyle = lipgloss.NewStyle().
@@ -1292,7 +1462,7 @@ var (
 				Padding(0, 1)
 
 	composerAccentStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#4d8dff")).
+				Background(lipgloss.Color("#5fa876")).
 				Width(1)
 
 	composerShellStyle = lipgloss.NewStyle().
@@ -1338,10 +1508,10 @@ var (
 			BorderForeground(lipgloss.Color("#313131")).
 			Padding(0, 1)
 
-	titleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#39d98a")).Bold(true)
+	titleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7fe0a1")).Bold(true)
 	infoStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f2f2f2"))
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b")).Bold(true)
-	cyanStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#36c7ff"))
+	cyanStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#69d68c"))
 	mutedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#8f8f8f"))
 )
 
@@ -1353,22 +1523,30 @@ func (m *model) homeView() string {
 		Render(cyanStyle.Render("Provider") + infoStyle.Render(": "+m.providerName+"  ") + cyanStyle.Render("Modelo") + infoStyle.Render(": "+m.providerModel) + "\n" + mutedStyle.Render("Estado: "+statusText))
 	meta := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		homeMetaAgentStyle.Render("Odrys"),
+		lipgloss.NewStyle().Foreground(agentColor(m.currentAgentName)).Render(m.currentAgentName),
 		homeMetaTextStyle.Render("  "+m.providerModel),
 		homeMetaMutedStyle.Render("  "+m.providerName),
 	)
 	box := homeFrameStyle.Render(m.homeInput.View() + "\n" + meta)
-	help := homeHelpStyle.Render("ctrl+o help  ctrl+l modelos")
+	shortcut := func(key, label string) string {
+		return homeHelpKeyStyle.Render(key) + " " + mutedStyle.Render(label)
+	}
+	helpTop := shortcut("ctrl+h", "agentes") + "  " + shortcut("ctrl+o", "help") + "  " + shortcut("ctrl+l", "modelos")
+	coreStatus := mutedStyle.Render("core ") + lipgloss.NewStyle().Foreground(lipgloss.Color("#39d98a")).Render("on")
 	if m.serverAvailable {
-		help = homeHelpStyle.Render("ctrl+o help  ctrl+l modelos  core on")
+		coreStatus = mutedStyle.Render("core ") + lipgloss.NewStyle().Foreground(lipgloss.Color("#39d98a")).Render("on")
 	} else {
-		help = homeHelpStyle.Render("ctrl+o help  ctrl+l modelos  core off")
+		coreStatus = mutedStyle.Render("core ") + lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6b6b")).Render("off")
 	}
 	blockWidth := max(lipgloss.Width(logo), lipgloss.Width(box))
 	logoRow := lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, logo)
 	statusRow := lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, statusBar)
 	boxRow := lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, box)
-	helpRow := lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, help)
+	helpRow := homeHelpStyle.Render(lipgloss.JoinVertical(
+		lipgloss.Center,
+		lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, helpTop),
+		lipgloss.PlaceHorizontal(blockWidth, lipgloss.Center, coreStatus),
+	))
 
 	extra := ""
 	if strings.TrimSpace(m.errText) != "" {
@@ -1396,6 +1574,39 @@ func (m *model) helpView() string {
 			prefix = "› "
 		}
 		rows = append(rows, card.Width(width-4).Render(prefix+item.title+"  "+menuHintStyle.Render("· "+item.description)))
+	}
+	panel := menuPanelStyle.
+		Padding(0, 1).
+		Width(width).
+		Render(strings.Join(rows, "\n"))
+
+	return pageStyle.Width(m.width).Height(m.height).Render(
+		lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, panel),
+	)
+}
+
+func (m *model) agentsView() string {
+	items := m.agentMenuItems()
+	width := max(34, m.width-28)
+	rows := []string{
+		menuTitleStyle.Render("Agentes"),
+		menuHintStyle.Render("Flechas + enter. Esc para volver. Abre con ctrl+h."),
+	}
+	for index, item := range items {
+		card := lipgloss.NewStyle().Foreground(lipgloss.Color("#dcdcdc"))
+		prefix := "  "
+		if index == m.agentCursor {
+			card = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f4f7fb")).
+				Background(lipgloss.Color("#1d2330"))
+			prefix = "› "
+		}
+		label := lipgloss.NewStyle().Foreground(agentColor(item.title)).Render(item.title)
+		active := ""
+		if item.title == m.currentAgentName {
+			active = "  activo"
+		}
+		rows = append(rows, card.Width(width-4).Render(prefix+label+"  "+menuHintStyle.Render("· "+item.description)+active))
 	}
 	panel := menuPanelStyle.
 		Padding(0, 1).
@@ -1622,7 +1833,7 @@ func (m *model) sessionView() string {
 
 	composerMeta := lipgloss.JoinHorizontal(
 		lipgloss.Top,
-		homeMetaAgentStyle.Render(m.currentAgentName),
+		lipgloss.NewStyle().Foreground(agentColor(m.currentAgentName)).Render(m.currentAgentName),
 		homeMetaTextStyle.Render("  "+m.providerModel),
 		homeMetaMutedStyle.Render("  "+m.providerName),
 	)
@@ -1631,7 +1842,11 @@ func (m *model) sessionView() string {
 	inputField := composerInputFieldStyle.Width(max(12, composerBodyWidth-6)).Render(composerInputStyle.Render(m.sessionInput.View()))
 	composerBody := composerBodyStyle.Width(composerBodyWidth).Render(inputField + "\n" + composerMeta)
 	composer := composerShellStyle.Width(max(20, m.width-6)).Render(
-		lipgloss.JoinHorizontal(lipgloss.Top, composerAccentStyle.Height(lipgloss.Height(composerBody)).Render(""), composerBody),
+		lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			lipgloss.NewStyle().Background(agentColor(m.currentAgentName)).Width(1).Height(lipgloss.Height(composerBody)).Render(""),
+			composerBody,
+		),
 	)
 
 	body := lipgloss.JoinVertical(lipgloss.Left, header, "", mainViewport, "", composer, "", footer)
@@ -1658,12 +1873,15 @@ func (m *model) userBubble(text string) string {
 }
 
 func (m *model) assistantBubble(name, text string) string {
-	bubble := eventBlockStyle.Width(m.bubbleWidth(76)).Render(cyanStyle.Render(name) + "\n" + infoStyle.Render(text))
+	title := cyanStyle.Render(name)
+	bubble := eventBlockStyle.Width(m.bubbleWidth(76)).BorderForeground(lipgloss.Color("#35533d")).Render(title + "\n" + infoStyle.Render(text))
 	return lipgloss.NewStyle().Width(max(20, m.width-10)).Align(lipgloss.Left).Render(bubble)
 }
 
 func (m *model) agentBadge(name, model, provider string) string {
-	return eventBlockStyle.Width(m.bubbleWidth(38)).Render(cyanStyle.Render("◻ "+name) + mutedStyle.Render(" · "+model+" "+provider))
+	return eventBlockStyle.Width(m.bubbleWidth(38)).BorderForeground(lipgloss.Color("#35533d")).Render(
+		cyanStyle.Render("◻ "+name) + mutedStyle.Render(" · "+model+" "+provider),
+	)
 }
 
 func (m *model) systemBubble(title, text string) string {

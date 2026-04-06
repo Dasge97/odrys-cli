@@ -267,6 +267,14 @@ func (s *Service) ChatWithOptions(goal string, options RunOptions) (ChatResult, 
 	return runDirectChat(s.Root, goal, cfg, options)
 }
 
+func (s *Service) RunAgentWithOptions(agentRole, goal string, options RunOptions) (AgentRunResult, error) {
+	cfg, err := s.LoadConfig()
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	return runSingleAgent(s.Root, agentRole, goal, cfg, options)
+}
+
 func (s *Service) Scan() (map[string]any, error) {
 	cfg, err := s.LoadConfig()
 	if err != nil {
@@ -1827,6 +1835,193 @@ func shouldUpdateProjectStateFromDirectChat(goal, reply string) bool {
 		}
 	}
 	return false
+}
+
+func runSingleAgent(root, agentRole, goal string, config Config, options RunOptions) (AgentRunResult, error) {
+	provider := createProvider(root, config.Provider)
+	workspace, err := resolveWorkspace(root, config.Workspace)
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	var session *Session
+	if strings.TrimSpace(options.SessionID) != "" {
+		loaded, loadErr := loadOrCreateSession(root, options.SessionID, goal)
+		if loadErr != nil {
+			return AgentRunResult{}, loadErr
+		}
+		session = &loaded
+	}
+	mode := "execute"
+	if agentRole == "reviewer" {
+		mode = "review"
+	}
+	contextList, err := buildContext(root, goal, mode, &workspace, config.Permission, session, config.Session)
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	contextText := formatContext(contextList)
+	task := goal
+	if agentRole == "summarizer" {
+		currentState, stateErr := readProjectState(root)
+		if stateErr != nil {
+			return AgentRunResult{}, stateErr
+		}
+		contextText += "\n\n## current_project_state\n\n" + currentState
+		task = "actualizar o resumir el estado del proyecto segun la peticion del usuario"
+	}
+	raw, err := callAgent(context.Background(), root, provider, agentRole, goal, task, contextText, nil)
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	if agentRole == "executor" {
+		raw, err = normalizeExecutorOutputForTask(raw, task)
+		if err != nil {
+			return AgentRunResult{}, err
+		}
+	}
+	var applied []AppliedOperation
+	if agentRole == "executor" {
+		var out ExecutorOutput
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return AgentRunResult{}, err
+		}
+		applied, err = applyExecutorOperations(workspace, config.Permission, out.Operations, options.Overrides)
+		if err != nil {
+			return AgentRunResult{}, err
+		}
+	}
+	reply, err := renderSingleAgentReply(agentRole, raw, applied)
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	if agentRole == "summarizer" {
+		var out SummarizerOutput
+		if err := json.Unmarshal(raw, &out); err == nil && strings.TrimSpace(out.ProjectState) != "" {
+			if err := updateProjectState(root, out.ProjectState); err != nil {
+				return AgentRunResult{}, err
+			}
+		}
+	}
+	persistedSession, err := appendSessionMessage(root, options.SessionID, "user", goal)
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	if _, err := appendSessionAssistantMemory(root, persistedSession.ID, reply, trimForContext(reply, 180), nil); err != nil {
+		return AgentRunResult{}, err
+	}
+	if _, err := appendSessionMessage(root, persistedSession.ID, "system", getAgent(agentRole).Name+" completado para: "+goal); err != nil {
+		return AgentRunResult{}, err
+	}
+	result := AgentRunResult{
+		Status:    "completed",
+		Goal:      goal,
+		Agent:     agentRole,
+		Reply:     reply,
+		AppliedOperations: applied,
+		SessionID: persistedSession.ID,
+	}
+	logPath, err := writeRunLog(root, map[string]any{
+		"started_at": time.Now().UTC().Format(time.RFC3339),
+		"mode":       "agent",
+		"agent":      agentRole,
+		"goal":       goal,
+		"result":     result,
+	})
+	if err != nil {
+		return AgentRunResult{}, err
+	}
+	result.LogPath = logPath
+	return result, nil
+}
+
+func renderSingleAgentReply(agentRole string, raw json.RawMessage, applied []AppliedOperation) (string, error) {
+	switch agentRole {
+	case "planner":
+		var out PlannerOutput
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		lines := []string{strings.TrimSpace(out.Summary)}
+		for _, phase := range out.Phases {
+			if strings.TrimSpace(phase.Name) != "" || strings.TrimSpace(phase.Goal) != "" {
+				lines = append(lines, fmt.Sprintf("Fase: %s", oneLineText(strings.TrimSpace(phase.Name+" - "+phase.Goal))))
+			}
+			for _, task := range phase.Tasks {
+				if strings.TrimSpace(task.Description) != "" {
+					lines = append(lines, "- "+strings.TrimSpace(task.Description))
+				}
+			}
+		}
+		if strings.TrimSpace(out.NextAction) != "" {
+			lines = append(lines, "Siguiente paso: "+strings.TrimSpace(out.NextAction))
+		}
+		return strings.Join(lines, "\n"), nil
+	case "executor":
+		var out ExecutorOutput
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		summary := strings.TrimSpace(out.Summary)
+		if summary == "" {
+			summary = "He ejecutado la tarea solicitada."
+		}
+		lines := []string{summary}
+		if len(out.Changes) > 0 {
+			lines = append(lines, "Cambios:")
+			for _, change := range out.Changes {
+				lines = append(lines, "- "+strings.TrimSpace(change))
+			}
+		}
+		if len(applied) > 0 {
+			lines = append(lines, "Operaciones aplicadas:")
+			for _, op := range applied {
+				label := op.Tool
+				if strings.TrimSpace(op.Path) != "" {
+					label += " " + op.Path
+				}
+				lines = append(lines, "- "+label)
+			}
+		} else if len(out.Operations) > 0 {
+			lines = append(lines, "Operaciones propuestas:")
+			for _, op := range out.Operations {
+				label := op.Tool
+				if strings.TrimSpace(op.Path) != "" {
+					label += " " + op.Path
+				}
+				lines = append(lines, "- "+label)
+			}
+		}
+		return strings.Join(lines, "\n"), nil
+	case "reviewer":
+		var out ReviewerOutput
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		lines := []string{strings.TrimSpace(out.Summary)}
+		if len(out.Errors) > 0 {
+			lines = append(lines, "Observaciones:")
+			for _, item := range out.Errors {
+				lines = append(lines, fmt.Sprintf("- [%s] %s", strings.TrimSpace(item.Severity), strings.TrimSpace(item.Message)))
+			}
+		}
+		if strings.TrimSpace(out.NextAction) != "" {
+			lines = append(lines, "Siguiente paso: "+strings.TrimSpace(out.NextAction))
+		}
+		return strings.Join(lines, "\n"), nil
+	case "summarizer":
+		var out SummarizerOutput
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return "", err
+		}
+		lines := []string{"He actualizado el estado del proyecto."}
+		if strings.TrimSpace(out.NextAction) != "" {
+			lines = append(lines, "Siguiente paso: "+strings.TrimSpace(out.NextAction))
+		}
+		lines = append(lines, "", trimForContext(out.ProjectState, 600))
+		return strings.Join(lines, "\n"), nil
+	default:
+		return string(raw), nil
+	}
 }
 
 func runWorker(root, goal string, config Config, options RunOptions) (RunResult, error) {

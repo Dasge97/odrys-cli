@@ -13,6 +13,7 @@ dist/
 .odrys/core-state.json
 .odrys/core-client.json
 .odrys/server-state.json
+.odrys/core-autostart.log
 logs/runs/
 logs/sessions/
 

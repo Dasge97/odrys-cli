@@ -10,6 +10,58 @@ while [ -L "${SOURCE_PATH}" ]; do
 done
 ROOT_DIR="$(cd "$(dirname "${SOURCE_PATH}")" && pwd)"
 LOCAL_GO="${HOME}/.local/go/bin/go"
+PROJECT_DIR="$(pwd)"
+CORE_URL="${ODYRSD_URL:-http://127.0.0.1:4111}"
+
+ensure_core() {
+  case "${1:-}" in
+    server|help|--help|-h)
+      return 0
+      ;;
+  esac
+
+  local health=""
+  if command -v curl >/dev/null 2>&1; then
+    health="$(curl -s "${CORE_URL}/health" 2>/dev/null || true)"
+  fi
+
+  local expected_root actual_root
+  expected_root="$(cd "${PROJECT_DIR}" && pwd)"
+  actual_root="$(printf '%s' "${health}" | sed -n 's/.*"root":"\([^"]*\)".*/\1/p')"
+
+  if [ -n "${actual_root}" ] && [ "${actual_root}" = "${expected_root}" ]; then
+    return 0
+  fi
+
+  mkdir -p "${PROJECT_DIR}/.odrys"
+  if [ -x "${ROOT_DIR}/dist/odrys-core" ]; then
+    (
+      cd "${PROJECT_DIR}"
+      nohup "${ROOT_DIR}/dist/odrys-core" >/dev/null 2>"${PROJECT_DIR}/.odrys/core-autostart.log" &
+    )
+    sleep 1
+    return 0
+  fi
+
+  if [ -x "${LOCAL_GO}" ]; then
+    (
+      cd "${PROJECT_DIR}"
+      nohup "${LOCAL_GO}" run "${ROOT_DIR}/cmd/odrys-core" >/dev/null 2>"${PROJECT_DIR}/.odrys/core-autostart.log" &
+    )
+    sleep 1
+    return 0
+  fi
+
+  if command -v go >/dev/null 2>&1; then
+    (
+      cd "${PROJECT_DIR}"
+      nohup go run "${ROOT_DIR}/cmd/odrys-core" >/dev/null 2>"${PROJECT_DIR}/.odrys/core-autostart.log" &
+    )
+    sleep 1
+  fi
+}
+
+ensure_core "${1:-}"
 
 if [ -x "${ROOT_DIR}/dist/odrys" ]; then
   exec "${ROOT_DIR}/dist/odrys" "$@"

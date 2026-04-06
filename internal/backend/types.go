@@ -72,6 +72,16 @@ type ChatResult struct {
 	SessionID string `json:"session_id,omitempty"`
 }
 
+type AgentRunResult struct {
+	Status    string `json:"status"`
+	Goal      string `json:"goal"`
+	Agent     string `json:"agent"`
+	Reply     string `json:"reply"`
+	AppliedOperations []AppliedOperation `json:"applied_operations,omitempty"`
+	LogPath   string `json:"log_path"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
 type RunTask struct {
 	Task              string             `json:"task"`
 	Executor          ExecutorOutput     `json:"executor"`

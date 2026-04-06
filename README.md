@@ -239,6 +239,7 @@ Comandos utiles dentro del cliente:
 
 La TUI tambien permite:
 
+- abrir la vista de agentes con `ctrl+h`
 - abrir el menu con `ctrl+o`
 - abrir la vista de modelos/providers con `ctrl+l`
 - abrir `sessions` como lista interactiva de historiales guardados
